@@ -38,7 +38,7 @@ def transition_ratio(dynamics, ratio_des, ratio_save, xs_low, xs_high, control_s
     #random control 
 
     x_start = np.copy(xs_low)
-    control_node = np.random.RandomState(control_seed).choice(N, control_num)
+    control_node = np.random.RandomState(control_seed).choice(N, control_num, replace=False)
     x_start[control_node] = control_value
     ratio1 = control_num/N
     stop=1
@@ -86,14 +86,16 @@ def ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, 
     A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, network_seed, d)
     xs_low, xs_high = stable_state(A, A_interaction, index_i, index_j, cum_index, arguments)
     parameters = (N, index_i, index_j, A_interaction, cum_index, arguments)
-    ratio_des = f'../data/beta={beta}/' +  dynamics.__name__ + network_type + f'N={N}_control_num={control_num}_value={control_value}'
-    evolution_des = f'../data/beta={beta}/evolution/' + dynamics.__name__ + network_type + f'N={N}_control_num={control_num}_value={control_value}'
+    ratio_dir = '../data/' +  dynamics.__name__ + '_' + network_type + f'/beta={beta}/'
+    evolution_dir = ratio_dir + 'evolution/'
+    if not os.path.exists(ratio_dir):
+        os.makedirs(ratio_dir)
+    if not os.path.exists(evolution_dir):
+        os.makedirs(evolution_dir)
 
-    if not os.path.exists(f'../data/beta={beta}'):
-        os.makedirs(f'../data/beta={beta}')
+    ratio_des = ratio_dir + f'N={N}_control_num={control_num}_value={control_value}'
+    evolution_des = evolution_dir + f'N={N}_control_num={control_num}_value={control_value}'
 
-    if not os.path.exists(f'../data/beta={beta}/evolution/'):
-        os.makedirs(f'../data/beta={beta}/evolution/')
 
 
     p = mp.Pool(cpu_number)
@@ -107,11 +109,10 @@ arguments = (B, C, D, E, H, K)
 dynamics = mutual_multi
 network_type = '2D'
 N = 100
-beta = 2
+beta = 1
 control_value_list = [1]
 control_num_list = [10]
-control_seed_list = [177]
-control_seed_list = np.arange(0, 1, 1)
+control_seed_list = np.arange(0, 10, 1)
 ratio_save = 1
 evolution_save = 0
 
