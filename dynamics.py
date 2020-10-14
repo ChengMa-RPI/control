@@ -76,7 +76,7 @@ def transition_ratio(dynamics, ratio_des, ratio_save, xs_low, xs_high, control_s
             ratio_df.to_csv(ratio_des + '.csv', mode='a', index=False, header=False)
     return None
 
-def ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, control_value, control_seed_list, network_seed=0, d=None, t=np.arange(0, 50, 0.01), ratio_save=True, evolution_save=False):
+def ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, control_value, control_seed_list, network_seed=0, d=None, t=np.arange(0, 50, 0.01), ratio_save=1, evolution_save=0):
     """TODO: Docstring for ratio_stabilize.
 
     :arg1: TODO
@@ -96,7 +96,9 @@ def ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, 
     ratio_des = ratio_dir + f'N={N}_control_num={control_num}_value={control_value}'
     evolution_des = evolution_dir + f'N={N}_control_num={control_num}_value={control_value}'
 
-
+    if ratio_save and os.path.exists(ratio_des + '.csv') and control_seed_list[0] == 0:
+        print('already exists!', f'N={N}', f'control_num={control_num}', f'control_value={control_value}')
+        return None
 
     p = mp.Pool(cpu_number)
     p.starmap_async(transition_ratio, [(dynamics, ratio_des, ratio_save, xs_low, xs_high, control_seed, control_num, control_value, t, N, parameters, evolution_des, evolution_save) for control_seed in control_seed_list]).get()
@@ -104,21 +106,73 @@ def ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, 
     p.join()
     return None
 
+def neighbor_dynamics(x, t, k_L, k_H, x_L, x_H, arguments):
+    """TODO: Docstring for neighbor_dynamics.
+
+    :arg1: TODO
+    :returns: TODO
+
+    """
+    B, C, D, E, H, K = arguments
+    dxdt = B + x * (1 - x/K) * ( x/C - 1) + k_L * x*x_L / (D + E*x + H*x_L) + k_H * x*x_H/(D + E*x + H*x_H) 
+    return dxdt
+
+def neighbor_effect(dynamics, network_type, N, arguments, beta_set, degree=4, network_seed=0, d=None, t=np.arange(0, 50, 0.01)):
+    """original dynamics N species interaction.
+
+    :x: N dynamic variables, 1 * N vector 
+    :t: time 
+    :N: the number of interacting variables 
+    :index: the index of non-zero element of adjacency matrix A, N * N matrix 
+    :neighbor: the degree of each node 
+    :A_interaction: non-zero element of adjacency matrix A, 1 * N vector
+    :returns: derivative of x 
+
+    """
+    neighbor_H_set = []
+    for beta in beta_set:
+        for N_L in np.arange(0, degree)[::-1]:
+            
+            N_H = degree - N_L
+            A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, network_seed, d)
+            xs_low, xs_high = stable_state(A, A_interaction, index_i, index_j, cum_index, arguments, d=d)
+            x_L = xs_low[0]
+            x_H = xs_high[0]
+            k_L = N_L/(N_L + N_H) * np.sum(A, 0)[0]
+            k_H = N_H/(N_L + N_H) * np.sum(A, 0)[0]
+            x = odeint(neighbor_dynamics, x_L, t, args=(k_L, k_H, x_L, x_H, arguments))[-1]
+            R = (x - x_L)/(x_H - x_L)
+            if R>0.2:
+                neighbor_H = N_H
+                break
+            else:
+                neighbor_H = degree + 1
+        neighbor_H_set.append(neighbor_H)
+
+    return np.array(neighbor_H_set)
+
+
 
 arguments = (B, C, D, E, H, K)
 dynamics = mutual_multi
 network_type = '2D'
 N = 100
-beta = 1
+beta_list = np.setdiff1d(np.round(np.arange(0.42, 1.3, 0.02), 2), np.round(np.arange(0.4, 1.3, 0.1), 2))
+
 control_value_list = [1]
 control_num_list = [10]
-control_seed_list = np.arange(0, 10, 1)
+control_seed_list = np.arange(0, 1, 1)
 ratio_save = 1
 evolution_save = 0
 
-for control_num in control_num_list:
-    for control_value in control_value_list:
-        t1 = time.time()
-        ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, control_value, control_seed_list, ratio_save=ratio_save, evolution_save=evolution_save)
-        t2 = time.time()
-        print(t2 -t1)
+for beta in beta_list:
+    for control_num in control_num_list:
+        for control_value in control_value_list:
+            t1 = time.time()
+            ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, control_value, control_seed_list, ratio_save=ratio_save, evolution_save=evolution_save)
+            t2 = time.time()
+            print(t2 -t1)
+'''
+beta_set = np.arange(0, 2, 0.1)
+neighbor_H = neighbor_effect(dynamics, network_type, N, arguments, beta_set)
+'''
