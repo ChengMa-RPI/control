@@ -1,6 +1,6 @@
 import sys
 sys.path.insert(1, '/home/mac/RPI/research/')
-from mutual_framework import load_data, A_from_data, Gcc_A_mat, betaspace, stable_state, mutual_1D, mutual_multi, network_generate, normalization_x
+from mutual_framework import load_data, A_from_data, Gcc_A_mat, betaspace, stable_state, mutual_1D, mutual_multi, network_generate, normalization_x, ode_Cheng
 
 import numpy as np 
 from scipy.integrate import odeint 
@@ -23,7 +23,7 @@ K = 5
 D = 5 
 E = 0.9
 H = 0.1
-cpu_number = 12
+cpu_number = 10
 
 def transition_ratio(dynamics, ratio_des, ratio_save, xs_low, xs_high, control_seed, control_num, control_value, t, N, parameters, evolution_des, evolution_save):
     """TODO: Docstring for transition_ratio.
@@ -49,7 +49,8 @@ def transition_ratio(dynamics, ratio_des, ratio_save, xs_low, xs_high, control_s
     path = pathlib.Path(evolution_file)
     with path.open('ab') as f:
         while stop:
-            x = odeint(dynamics, x_start, t, args=parameters)
+            #x = ode_Cheng(dynamics, x_start, t, *(parameters))
+            x = odeint(dynamics, x_start, t, parameters)
             if evolution_save:
                 R = normalization_x(x, xs_low, xs_high)
                 np.save(f, R)
@@ -158,10 +159,11 @@ dynamics = mutual_multi
 network_type = '2D'
 N = 100
 beta_list = np.setdiff1d(np.round(np.arange(0.42, 1.3, 0.02), 2), np.round(np.arange(0.4, 1.3, 0.1), 2))
+beta_list = [0.92]
 
 control_value_list = [1]
-control_num_list = [10]
-control_seed_list = np.arange(0, 1, 1)
+control_num_list = [30]
+control_seed_list = np.arange(100, 200, 1)
 ratio_save = 1
 evolution_save = 0
 
