@@ -1,12 +1,14 @@
+import os
+os.environ['OPENBLAS_NUM_THREADS'] ='1'
+
 import sys
 sys.path.insert(1, '/home/mac/RPI/research/')
-from mutual_framework import load_data, A_from_data, Gcc_A_mat, betaspace, stable_state, mutual_1D, mutual_multi, network_generate, normalization_x, ode_Cheng
+from mutual_framework import load_data, A_from_data, Gcc_A_mat, betaspace, stable_state, mutual_1D, mutual_multi, network_generate, normalization_x, ode_Cheng, gif
 
 import numpy as np 
 from scipy.integrate import odeint 
 import matplotlib.pyplot as plt
 import time 
-import os
 import pandas as pd
 import multiprocessing as mp
 from scipy.optimize import fsolve, root
@@ -23,6 +25,7 @@ K = 5
 D = 5 
 E = 0.9
 H = 0.1
+
 cpu_number = 10
 
 def transition_ratio(dynamics, ratio_des, ratio_save, xs_low, xs_high, control_seed, control_num, control_value, t, N, parameters, evolution_des, evolution_save):
@@ -49,8 +52,8 @@ def transition_ratio(dynamics, ratio_des, ratio_save, xs_low, xs_high, control_s
     path = pathlib.Path(evolution_file)
     with path.open('ab') as f:
         while stop:
-            #x = ode_Cheng(dynamics, x_start, t, *(parameters))
-            x = odeint(dynamics, x_start, t, parameters)
+            x = ode_Cheng(dynamics, x_start, t, *(parameters))
+            #x = odeint(dynamics, x_start, t, parameters)
             if evolution_save:
                 R = normalization_x(x, xs_low, xs_high)
                 np.save(f, R)
@@ -86,21 +89,31 @@ def ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, 
     """
     A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, network_seed, d)
     xs_low, xs_high = stable_state(A, A_interaction, index_i, index_j, cum_index, arguments)
-    parameters = (N, index_i, index_j, A_interaction, cum_index, arguments)
-    ratio_dir = '../data/' +  dynamics.__name__ + '_' + network_type + f'/beta={beta}/'
+    if network_type == '2D':
+        ratio_dir = '../data/' +  dynamics.__name__ + '_' + network_type + f'/beta={beta}/'
+    else:
+        ratio_dir = '../data/' +  dynamics.__name__ + '_' + network_type + f'/d={d}/beta={beta}/'
+
     evolution_dir = ratio_dir + 'evolution/'
     if not os.path.exists(ratio_dir):
         os.makedirs(ratio_dir)
     if not os.path.exists(evolution_dir):
         os.makedirs(evolution_dir)
 
-    ratio_des = ratio_dir + f'N={N}_control_num={control_num}_value={control_value}'
-    evolution_des = evolution_dir + f'N={N}_control_num={control_num}_value={control_value}'
+    if network_type == '2D':
+        ratio_des = ratio_dir + f'N={N}_control_num={control_num}_value={control_value}'
+        evolution_des = evolution_dir + f'N={N}_control_num={control_num}_value={control_value}'
+    else:
+        ratio_des = ratio_dir + f'netseed={network_seed}_N={N}_control_num={control_num}_value={control_value}'
+        evolution_des = evolution_dir + f'netseed={network_seed}_N={N}_control_num={control_num}_value={control_value}'
+
 
     if ratio_save and os.path.exists(ratio_des + '.csv') and control_seed_list[0] == 0:
         print('already exists!', f'N={N}', f'control_num={control_num}', f'control_value={control_value}')
         return None
 
+    N = np.size(A, 0)
+    parameters = (N, index_i, index_j, A_interaction, cum_index, arguments)
     p = mp.Pool(cpu_number)
     p.starmap_async(transition_ratio, [(dynamics, ratio_des, ratio_save, xs_low, xs_high, control_seed, control_num, control_value, t, N, parameters, evolution_des, evolution_save) for control_seed in control_seed_list]).get()
     p.close()
@@ -157,23 +170,27 @@ def neighbor_effect(dynamics, network_type, N, arguments, beta_set, degree=4, ne
 arguments = (B, C, D, E, H, K)
 dynamics = mutual_multi
 network_type = '2D'
-N = 100
+network_type = 'ER'
+network_seed = 0
+N = 900
 beta_list = np.setdiff1d(np.round(np.arange(0.42, 1.3, 0.02), 2), np.round(np.arange(0.4, 1.3, 0.1), 2))
-beta_list = [0.92]
+beta_list = [1]
+d_list = [7200]
 
 control_value_list = [1]
-control_num_list = [30]
-control_seed_list = np.arange(100, 200, 1)
+control_num_list = [100]
+control_seed_list = np.arange(0, 1000, 1)
 ratio_save = 1
 evolution_save = 0
 
-for beta in beta_list:
-    for control_num in control_num_list:
-        for control_value in control_value_list:
-            t1 = time.time()
-            ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, control_value, control_seed_list, ratio_save=ratio_save, evolution_save=evolution_save)
-            t2 = time.time()
-            print(t2 -t1)
+for d in d_list:
+    for beta in beta_list:
+        for control_num in control_num_list:
+            for control_value in control_value_list:
+                t1 = time.time()
+                ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, control_value, control_seed_list, network_seed=network_seed, d=d, ratio_save=ratio_save, evolution_save=evolution_save)
+                t2 = time.time()
+                print(t2 -t1)
 '''
 beta_set = np.arange(0, 2, 0.1)
 neighbor_H = neighbor_effect(dynamics, network_type, N, arguments, beta_set)
