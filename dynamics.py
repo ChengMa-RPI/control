@@ -80,19 +80,24 @@ def transition_ratio(dynamics, ratio_des, ratio_save, xs_low, xs_high, control_s
             ratio_df.to_csv(ratio_des + '.csv', mode='a', index=False, header=False)
     return None
 
-def ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, control_value, control_seed_list, network_seed=0, d=None, t=np.arange(0, 50, 0.01), ratio_save=1, evolution_save=0):
+def ratio_distribution(dynamics, network_type, N, arguments, beta, betaeffect, control_num, control_value, control_seed_list, network_seed=0, d=None, t=np.arange(0, 50, 0.01), ratio_save=1, evolution_save=0):
     """TODO: Docstring for ratio_stabilize.
 
     :arg1: TODO
     :returns: TODO
 
     """
-    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, network_seed, d)
+    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
     xs_low, xs_high = stable_state(A, A_interaction, index_i, index_j, cum_index, arguments)
     if network_type == '2D':
-        ratio_dir = '../data/' +  dynamics.__name__ + '_' + network_type + f'/beta={beta}/'
+        ratio_dir = '../data/' +  dynamics.__name__ + '_' + network_type 
     else:
-        ratio_dir = '../data/' +  dynamics.__name__ + '_' + network_type + f'/d={d}/beta={beta}/'
+        ratio_dir = '../data/' +  dynamics.__name__ + '_' + network_type + f'/d={d}'
+    if betaeffect:
+        ratio_dir = ratio_dir + f'/beta={beta}/'
+    else:
+        ratio_dir = ratio_dir + f'/edgewt={beta}/'
+
 
     evolution_dir = ratio_dir + 'evolution/'
     if not os.path.exists(ratio_dir):
@@ -131,7 +136,7 @@ def neighbor_dynamics(x, t, k_L, k_H, x_L, x_H, arguments):
     dxdt = B + x * (1 - x/K) * ( x/C - 1) + k_L * x*x_L / (D + E*x + H*x_L) + k_H * x*x_H/(D + E*x + H*x_H) 
     return dxdt
 
-def neighbor_effect(dynamics, network_type, N, arguments, beta_set, degree=4, network_seed=0, d=None, t=np.arange(0, 50, 0.01)):
+def neighbor_effect(dynamics, network_type, N, arguments, beta_set, betaeffect, degree=4, network_seed=0, d=None, t=np.arange(0, 50, 0.01)):
     """original dynamics N species interaction.
 
     :x: N dynamic variables, 1 * N vector 
@@ -148,7 +153,7 @@ def neighbor_effect(dynamics, network_type, N, arguments, beta_set, degree=4, ne
         for N_L in np.arange(0, degree)[::-1]:
             
             N_H = degree - N_L
-            A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, network_seed, d)
+            A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
             xs_low, xs_high = stable_state(A, A_interaction, index_i, index_j, cum_index, arguments, d=d)
             x_L = xs_low[0]
             x_H = xs_high[0]
@@ -175,23 +180,24 @@ network_seed = 0
 N = 900
 beta_list = np.setdiff1d(np.round(np.arange(0.42, 1.3, 0.02), 2), np.round(np.arange(0.4, 1.3, 0.1), 2))
 beta_list = [1]
-d_list = [7200]
+beta_list = [0.2]
+d_list = [1800]
 
 control_value_list = [1]
-control_num_list = [100]
+control_num_list = [5]
 control_seed_list = np.arange(0, 1000, 1)
 ratio_save = 1
 evolution_save = 0
-
+betaeffect = 0
 for d in d_list:
     for beta in beta_list:
         for control_num in control_num_list:
             for control_value in control_value_list:
                 t1 = time.time()
-                ratio_distribution(dynamics, network_type, N, arguments, beta, control_num, control_value, control_seed_list, network_seed=network_seed, d=d, ratio_save=ratio_save, evolution_save=evolution_save)
+                ratio_distribution(dynamics, network_type, N, arguments, beta, betaeffect, control_num, control_value, control_seed_list, network_seed=network_seed, d=d, ratio_save=ratio_save, evolution_save=evolution_save)
                 t2 = time.time()
                 print(t2 -t1)
 '''
 beta_set = np.arange(0, 2, 0.1)
-neighbor_H = neighbor_effect(dynamics, network_type, N, arguments, beta_set)
+neighbor_H = neighbor_effect(dynamics, network_type, N, arguments, beta_set, betaeffect)
 '''
