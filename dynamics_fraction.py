@@ -41,13 +41,9 @@ def transition_ratio(dynamics, ratio_des, ratio_save, xs_low, xs_high, control_s
     #random control 
 
     random_state = np.random.RandomState(control_seed)
-    state = np.zeros(N)
-    initialize = random_state.random(N)
-
-    state[initialize<=control_num] = 1
-
+    initialize = random_state.choice(N, int(control_num*N), replace=False)
     x_start = np.copy(xs_low)
-    x_start[initialize<=control_num] = control_value
+    x_start[initialize] = control_value
     ratio1 = control_num
     stop=1
     if evolution_save:
@@ -94,10 +90,8 @@ def ratio_distribution(dynamics, network_type, N, arguments, beta, betaeffect, c
     """
     A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
     xs_low, xs_high = stable_state(A, A_interaction, index_i, index_j, cum_index, arguments)
-    if network_type == '2D':
-        ratio_dir = '../data/' +  dynamics.__name__ + '_' + network_type 
-    else:
-        ratio_dir = '../data/' +  dynamics.__name__ + '_' + network_type + f'/d={d}'
+    average_degree = int(2 * d/N)
+    ratio_dir = '../data/' +  dynamics.__name__ + '/' + network_type + f'/c={average_degree}/'
     if betaeffect:
         ratio_dir = ratio_dir + f'/beta={beta}/'
     else:
@@ -110,12 +104,8 @@ def ratio_distribution(dynamics, network_type, N, arguments, beta, betaeffect, c
     if not os.path.exists(evolution_dir):
         os.makedirs(evolution_dir)
 
-    if network_type == '2D':
-        ratio_des = ratio_dir + f'N={N}_control_num={control_num}_value={control_value}'
-        evolution_des = evolution_dir + f'N={N}_control_num={control_num}_value={control_value}'
-    else:
-        ratio_des = ratio_dir + f'netseed={network_seed}_N={N}_control_num={control_num}_value={control_value}'
-        evolution_des = evolution_dir + f'netseed={network_seed}_N={N}_control_num={control_num}_value={control_value}'
+    ratio_des = ratio_dir + f'netseed={network_seed}_N={N}_control_num={control_num}_value={control_value}'
+    evolution_des = evolution_dir + f'netseed={network_seed}_N={N}_control_num={control_num}_value={control_value}'
 
 
     if ratio_save and os.path.exists(ratio_des + '.csv') and control_seed_list[0] == 0:
@@ -190,7 +180,7 @@ average_degree = np.array([4])
 d_list = np.array(N * average_degree /2, dtype=int)
 
 control_value_list = [1]
-control_num_list = [0.1, 0.2, 0.3]
+control_num_list = [0.05]
 control_seed_list = [0]
 control_seed_list = np.arange(0, 100, 1)
 ratio_save = 1
@@ -208,4 +198,4 @@ for d in d_list:
 
 egwt_list = np.arange(0, 0.5, 0.02)
 degree_list = np.arange(1, 50, 1)
-neighbor_H = neighbor_effect(dynamics, network_type, N, arguments, egwt_list, degree_list)
+#neighbor_H = neighbor_effect(dynamics, network_type, N, arguments, egwt_list, degree_list)
