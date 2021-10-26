@@ -18,6 +18,7 @@ import seaborn as sns
 import sympy as sp
 import pathlib 
 from scipy.special import comb
+import collections
 
 fontsize = 22
 ticksize = 18
@@ -32,7 +33,7 @@ D = 5
 E = 0.9
 H = 0.1
 
-cpu_number = 10
+cpu_number = 1
 
 def binary_search(xL, xR, yL, yR, threshold):
     """TODO: Docstring for binary_search.
@@ -53,6 +54,15 @@ def binary_search(xL, xR, yL, yR, threshold):
         xL, xR = xR, xR*2-xL
     return xL, xR
 
+def multi_conv(arr, iter_times):
+    if iter_times == 0:
+        temp_result = np.array([1])
+    else:
+        temp_result = arr
+        for _ in range(1, iter_times):
+            temp_result = np.convolve(arr, temp_result, mode='full') 
+    return temp_result
+
 def global_dynamics(x, t, beta, k_H, k_L, arguments):
     """TODO: Docstring for neighbor_dynamics.
 
@@ -67,7 +77,7 @@ def global_dynamics(x, t, beta, k_H, k_L, arguments):
     dxdt = fx + gx
     return dxdt
 
-def dynamics_xH_xL(x, t, beta, x_h, x_l, k_H, k_L, arguments):
+def dynamics_xH_xL(x, t, x_h, x_l, k_H, k_L, arguments):
     """TODO: Docstring for neighbor_dynamics.
 
     :arg1: TODO
@@ -79,6 +89,17 @@ def dynamics_xH_xL(x, t, beta, x_h, x_l, k_H, k_L, arguments):
     gx = k_H*x*x_h / (D + E*x + H*x_h) + k_L*x*x_l/(D + E*x + H*x_l)
     dxdt = fx + gx
     return dxdt
+
+def mutual_G(xi, xj, arguments):
+    """TODO: Docstring for neighbor_dynamics.
+
+    :arg1: TODO
+    :returns: TODO
+
+    """
+    B, C, D, E, H, K = arguments
+    gx = xi*xj / (D + E*xi + H*xj)
+    return gx
 
 def mutual_multi(x, t, arguments, net_arguments):
     """describe the derivative of x.
@@ -94,6 +115,21 @@ def mutual_multi(x, t, arguments, net_arguments):
     sum_f = B + x * (1 - x/K) * ( x/C - 1)
     sum_g = A_interaction * x[index_j] / (D + E * x[index_i] + H * x[index_j])
     dxdt = sum_f + x * np.add.reduceat(sum_g, cum_index[:-1])
+    return dxdt
+
+def mutual_decouple(x, t, x_eff, w, arguments):
+    """describe the derivative of x.
+    set universal parameters 
+    :x: the species abundance of plant network 
+    :t: the simulation time sequence 
+    :par: parameters  of this system
+    :returns: derivative of x 
+
+    """
+    B, C, D, E, H, K = arguments
+    sum_f = B + x * (1 - x/K) * ( x/C - 1)
+    sum_g = w * x * x_eff / (D + E * x + H * x_eff)
+    dxdt = sum_f + sum_g
     return dxdt
 
 def mutual_multi_constant(x, t, control_node, control_constant, arguments, net_arguments):
@@ -167,9 +203,6 @@ def random_control_parallel(network_type, N, beta, betaeffect, network_seed, d, 
 
     
         
-
-
-
 def threshold_sH_sL_neighbor(network_type, N, weight, network_seed, d, dynamics, arguments):
     """original dynamics N species interaction.
 
@@ -191,7 +224,7 @@ def threshold_sH_sL_neighbor(network_type, N, weight, network_seed, d, dynamics,
     for i, sL in enumerate(sL_list):
         for j, sH in enumerate(sH_list):
             #x = odeint(global_dynamics, np.array([5, 0, 0]), np.arange(0, 500, 0.01), args=(beta, sH, sL, arguments))[-1][-1]
-            x = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(beta, xH, xL, sH, sL, arguments))[-1]
+            x = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(xH, xL, sH, sL, arguments))[-1]
             xs_list[i, j] = x
 
     threshold_des = '../data/' + dynamics + '/threshold/' 
@@ -262,48 +295,6 @@ def threshold_sH_sL_neighbor_multi(network_type, N, beta, network_seed, d, dynam
     df.to_csv(des_file, index=False, header=False)
     return None
 
-
- 
-
-def threshold_sH_or_sL_neighbor(network_type, N, weight, network_seed, d, dynamics, arguments, threshold):
-    """original dynamics N species interaction.
-
-    :x: N dynamic variables, 1 * N vector 
-    :t: time 
-    :N: the number of interacting variables 
-    :index: the index of non-zero element of adjacency matrix A, N * N matrix 
-    :neighbor: the degree of each node 
-    :A_interaction: non-zero element of adjacency matrix A, 1 * N vector
-    :returns: derivative of x 
-
-    """
-    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, weight, 0, network_seed, d)
-    beta, _ = np.round(betaspace(A, [0]), 5)
-    xL, xH = odeint(mutual_1D, np.array([0.1, 5]), np.arange(0, 1000, 0.01), args=(beta, arguments))[-1]
-
-    sH_list = [0, 10]
-    sL_list = [0, 100]
-    while np.diff(sH_list)[0] > 1e-5:
-        xs_left = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(beta, xH, xL, sH_list[0], 0, arguments))[-1]
-        xs_right = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(beta, xH, xL, sH_list[1], 0, arguments))[-1]
-        sH_list[0], sH_list[1] = binary_search(sH_list[0], sH_list[1], xs_left, xs_right, threshold)
-    while np.diff(sL_list)[0] > 1e-5:
-        xs_left = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(beta, xH, xL, 0, sL_list[0], arguments))[-1]
-        xs_right = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(beta, xH, xL, 0, sL_list[1], arguments))[-1]
-        sL_list[0], sL_list[1] = binary_search(sL_list[0], sL_list[1], xs_left, xs_right, threshold)
-    sL = sL_list[-1]
-    sH = sH_list[-1]
-
-    threshold_des = '../data/' + dynamics + '/threshold/' 
-    file_threshold = threshold_des +  f'ER.csv'
-    if not os.path.exists(threshold_des):
-        os.makedirs(threshold_des)
-
-    data = np.hstack((network_seed, N, d, weight, beta, xL, xH, sL, sH))
-    data_df = pd.DataFrame(data.reshape(1, len(data)))
-    data_df.to_csv(file_threshold, index=False, header=False, mode='a')
-    return sH_list, sL_list
-
 def threshold_sH_or_sL_beta(dynamics, beta):
     """original dynamics N species interaction.
 
@@ -321,12 +312,12 @@ def threshold_sH_or_sL_beta(dynamics, beta):
     sH_list = [0, 10]
     sL_list = [0, 100]
     while np.diff(sH_list)[0] > 1e-5:
-        xs_left = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(beta, xH, xL, sH_list[0], 0, arguments))[-1]
-        xs_right = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(beta, xH, xL, sH_list[1], 0, arguments))[-1]
+        xs_left = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(xH, xL, sH_list[0], 0, arguments))[-1]
+        xs_right = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(xH, xL, sH_list[1], 0, arguments))[-1]
         sH_list[0], sH_list[1] = binary_search(sH_list[0], sH_list[1], xs_left, xs_right, threshold)
     while np.diff(sL_list)[0] > 1e-5:
-        xs_left = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(beta, xH, xL, 0, sL_list[0], arguments))[-1]
-        xs_right = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(beta, xH, xL, 0, sL_list[1], arguments))[-1]
+        xs_left = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(xH, xL, 0, sL_list[0], arguments))[-1]
+        xs_right = odeint(dynamics_xH_xL, np.array([0.1]), np.arange(0, 500, 0.01), args=(xH, xL, 0, sL_list[1], arguments))[-1]
         sL_list[0], sL_list[1] = binary_search(sL_list[0], sL_list[1], xs_left, xs_right, threshold)
     sL = sL_list[-1]
     sH = sH_list[-1]
@@ -412,7 +403,7 @@ def empirical_degree(network_type, N, network_seed, d):
     degree_probability = frequency/np.sum(frequency)
     degree_excess = (degree_bins[:-1] ) * degree_probability
     degree_excess_probability = degree_excess / np.sum(degree_excess)
-    return degree_bins[:-1], degree_probability, np.hstack((degree_excess_probability[1:], 0))
+    return degree_bins[:-1], degree_probability, degree_excess_probability
 
 def active_Z(x, degree_excess_distribution, f, n):
     """TODO: Docstring for active_probability.
@@ -483,8 +474,8 @@ def active_transition(network_type, N, d, network_seed, beta, betaeffect, dynami
     if degree_data=='empirical':
         degree_bins, degree_probability, degree_excess_probability = empirical_degree(network_type, N, network_seed, d)
         degree_distribution = np.hstack((np.zeros(degree_bins[0]), degree_probability, np.zeros(k-1-degree_bins[-1])))
-        degree_excess_distribution = np.hstack((np.zeros(degree_bins[0] ), degree_excess_probability, np.zeros(k-1-degree_bins[-1])))
-    elif network_type == 'ER':
+        degree_excess_distribution = np.hstack((np.zeros(degree_bins[0]- 1 ), degree_excess_probability, np.zeros(k-degree_bins[-1])))
+    elif degree_data == 'ER':
         degree_distribution = np.array([ER_degree(c, i) for i in degree])
 
     percolation_dir = '../data/' + dynamics + '/' + network_type +  f'/percolation/'
@@ -561,7 +552,6 @@ def activate_parallel(network_type, N, d, network_seed, control_seed_list, f, be
     for node in nodes:
         all_neighbors[node] = list(G.neighbors(node))
 
-    #nH = np.array(pd.read_csv('../data/' +dynamics + f'/threshold/beta={beta}_w={weight}.csv', header=None), dtype=int)[:, -1]
     nH = nH_k_sL_sH(dynamics, beta, weight)
 
     p = mp.Pool(cpu_number)
@@ -616,7 +606,340 @@ def heatmap_activate(network_type, N, d, network_seed, f, weight, active_seed, s
 
 
 
- 
+def compare_state_multi_decouple(network_type, N, d, beta, betaeffect, network_seed, dynamics, arguments, attractor_value):
+    """TODO: Docstring for compare_state_multi_decouple.
+
+    :network_type: TODO
+    :N: TODO
+    :d: TODO
+    :network_seed: TODO
+    :dynamics: TODO
+    :arguments: TODO
+    :: TODO
+    :returns: TODO
+
+    """
+    dynamics_decouple = globals()[dynamics + '_decouple']
+    dynamics_1D = globals()[dynamics + '_1D']
+    dynamics_multi = globals()[dynamics + '_multi']
+    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
+    beta_calculate = betaspace(A, [0])[0]
+    w = np.sum(A, 0)
+    N_actual = len(A)
+    initial_condition = np.ones(N_actual) * attractor_value
+    t = np.arange(0, 1000, 0.01)
+    net_arguments = (index_i, index_j, A_interaction, cum_index)
+    xs_multi = odeint(dynamics_multi, initial_condition, t, args=(arguments, net_arguments))[-1]
+    x_eff = odeint(dynamics_1D, initial_condition[0], t, args=(beta_calculate, arguments))[-1]
+    xs_decouple = odeint(dynamics_decouple, initial_condition, t, args=(x_eff, w, arguments))[-1]
+    return xs_multi, x_eff, xs_decouple
+
+
+def threshold_sH_or_sL_diffstate(network_type, N, d, beta, betaeffect, network_seed, dynamics, arguments, attractor_high, attractor_low):
+    """original dynamics N species interaction.
+
+    :returns: derivative of x 
+
+    """
+    dynamics_decouple = globals()[dynamics + '_decouple']
+    dynamics_1D = globals()[dynamics + '_1D']
+    dynamics_G = globals()[dynamics + '_G']
+    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
+    beta_calculate = betaspace(A, [0])[0]
+    w = np.sum(A, 0)
+    N_actual = len(A)
+    initial_low = np.ones(N_actual) * attractor_low
+    initial_high = np.ones(N_actual) * attractor_high
+    t = np.arange(0, 1000, 0.01)
+    xL, xH = odeint(dynamics_1D, np.array([attractor_low, attractor_high]), np.arange(0, 1000, 0.01), args=(beta_calculate, arguments))[-1]
+    xL_decouple = odeint(dynamics_decouple, initial_low, t, args=(xL, w, arguments))[-1]
+    xH_decouple = odeint(dynamics_decouple, initial_high, t, args=(xH, w, arguments))[-1]
+
+    sH_interval = [0, 100]
+    while np.diff(sH_interval)[0] > 1e-5:
+        xs_left = odeint(dynamics_xH_xL, np.array([attractor_low]), np.arange(0, 500, 0.01), args=(xH, xL, sH_interval[0], 0, arguments))[-1]
+        xs_right = odeint(dynamics_xH_xL, np.array([attractor_low]), np.arange(0, 500, 0.01), args=(xH, xL, sH_interval[1], 0, arguments))[-1]
+        sH_interval[0], sH_interval[1] = binary_search(sH_interval[0], sH_interval[1], xs_left, xs_right, attractor_high)
+    sH = sH_interval[-1]
+    xs_critical = xs_right
+    g_contribute = dynamics_G(xs_critical, xH_decouple, arguments)
+    gH_standard  = dynamics_G(xs_critical, xH, arguments)
+    gL_standard  = dynamics_G(xs_critical, xL, arguments)
+    gi_gH_ratio = g_contribute / gH_standard
+    gL_gH_ratio = gL_standard / gH_standard
+        
+    return sH, gL_gH_ratio, gi_gH_ratio
+
+def activate_process_diffstate(active_seed, active_file, nodes, all_neighbors, f, gL_gH_ratio, gi_gH_ratio, nH_critical):
+    """TODO: Docstring for activate_process.
+    :returns: TODO
+
+    """
+    active_file = active_file + f'controlseed={active_seed}.csv'
+    N_actual = len(nodes)
+    random_state = np.random.RandomState(active_seed)
+    control_order = random_state.choice(N_actual, N_actual, replace=False)
+    node_r = control_order[:int(f*N_actual)]
+    node_uncontrol = np.setdiff1d(control_order, node_r)
+    state = np.zeros(N_actual)
+    state[node_r] = 1
+    state_a = 0
+    state_b = N_actual
+    while state_a != state_b:
+        node_inactive = nodes[np.where(state ==0)[0]]
+        state_a = np.sum(state)
+        for node in node_inactive:
+            neighbor = all_neighbors[node]
+            neighbor_control = np.intersect1d(node_r, neighbor)
+            neighbor_uncontrol = np.setdiff1d(neighbor, neighbor_control)
+            neighbor_active_uncontrol = np.where(state[neighbor_uncontrol] == 1)[0]
+            neighbor_active_contribute = gi_gH_ratio[neighbor[neighbor_active_uncontrol]] if len(neighbor_active_uncontrol) else [0]
+            neighbor_inactive_num =  len(neighbor) - len(neighbor_control) - len(neighbor_active_uncontrol)
+            nH_sum = neighbor_inactive_num * gL_gH_ratio + np.sum(neighbor_active_contribute) + len(neighbor_control)
+            if nH_sum >= nH_critical:
+                state[node] = 1
+        state_b = np.sum(state)
+    data = np.hstack((f, state))
+    active_data = pd.DataFrame(data.reshape(1, len(data)))
+    active_data.to_csv(active_file , mode='a', index=False, header=False)
+    return None
+
+def activate_parallel_diffstate(network_type, N, d, network_seed, control_seed_list, f, beta, betaeffect, attractor_high, attractor_low):
+    """TODO: Docstring for activate_parallel.
+
+    :arg1: TODO
+    :returns: TODO
+
+    """
+    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
+    G = nx.from_numpy_matrix(A)
+    nodes = np.array(list(G.nodes()))
+    all_neighbors = {}
+    for node in nodes:
+        all_neighbors[node] = np.array(list(G.neighbors(node)))
+    sH, gL_gH_ratio, gi_gH_ratio = threshold_sH_or_sL_diffstate(network_type, N, d, beta, betaeffect, network_seed, dynamics, arguments, attractor_high, attractor_low)
+    active_des = '../data/' + dynamics + '/' + network_type +  f'/percolation_activation_diffstate/'
+    if not os.path.exists(active_des):
+        os.makedirs(active_des)
+    if betaeffect == 0:
+        weight = beta 
+        beta = betaspace(A, [0])[0]
+        active_file = active_des + f'N={N}_d={d}_netseed={network_seed}_weight={weight}_'
+    else:
+        weight = A.max()
+        active_file = active_des + f'N={N}_d={d}_netseed={network_seed}_beta={beta}_'
+
+    nH_critical = sH / weight
+    p = mp.Pool(cpu_number)
+    p.starmap_async(activate_process_diffstate, [(control_seed, active_file, nodes, all_neighbors, f, gL_gH_ratio, gi_gH_ratio, nH_critical) for control_seed in control_seed_list]).get()
+    p.close()
+    p.join()
+    return None
+
+def threshold_probability(network_type, N, d, network_seed, beta, betaeffect, dynamics, arguments, bin_num=100):
+    """TODO: Docstring for threshold_probability.
+
+    :network_type: TODO
+    :N: TODO
+    :d: TODO
+    :network_seed: TODO
+    :dynamics: TODO
+    :arguments: TODO
+    :num_high_neighbor: TODO
+    :n_threshold: TODO
+    :returns: TODO
+
+    """
+    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
+    weight = A.max()  # for uniform edge weights
+    k = np.sum(A>0, 0)
+    N_actual = len(k)
+    k_unique, index_unique = np.unique(k, return_index=True)
+    k_count = dict(sorted(collections.Counter(k).items()))
+    excess_degree = np.array(list(k_count.keys())) * np.array(list(k_count.values()))
+    excess_degree_dis = {i:j for i, j in zip(k_count.keys(), excess_degree)}
+
+    sH, gL_gH_ratio, gi_gH_ratio = threshold_sH_or_sL_diffstate(network_type, N, d, beta, betaeffect, network_seed, dynamics, arguments, attractor_high, attractor_low)
+    n_threshold = sH / weight
+    gi_gH_ratio_unique = gi_gH_ratio[index_unique]
+    n_dist, n_interval = np.histogram(gi_gH_ratio_unique, bin_num, weights=excess_degree, density=True)
+    n_value = (n_interval[:-1] + n_interval[1:]) / 2
+    n_value_diff = np.mean(np.diff(n_value))
+    survive_prob = {}
+    for num_high_neighbor in range(k_unique.max()+1):
+        if not num_high_neighbor in survive_prob:
+            survive_prob[num_high_neighbor] = {}
+        n_high_sum_value = np.array([n_value[0]*num_high_neighbor + i * n_value_diff for i in range(num_high_neighbor * (bin_num-1)+ 1)])
+        n_high_sum_dis = multi_conv(n_dist, num_high_neighbor)
+        n_high_sum_prob = n_high_sum_dis/n_high_sum_dis.sum()
+        for k_i in k_unique:
+            num_low_neighbor = k_i - num_high_neighbor
+            if num_low_neighbor >= 0:
+                contribute_low_neighbor = num_low_neighbor * gL_gH_ratio
+                if n_high_sum_value.max() < (n_threshold-contribute_low_neighbor):
+                    n_high_sum_cumu_prob = 0
+                else:
+                    index_satisfy = np.where(n_high_sum_value >= (n_threshold-contribute_low_neighbor))[0][0]
+                    n_high_sum_cumu_prob = np.sum(n_high_sum_prob[index_satisfy:])
+                survive_prob[num_high_neighbor][k_i] = n_high_sum_cumu_prob
+        if abs(min(list(survive_prob[num_high_neighbor].values())) - 1) < 1e-8:
+            break
+    return survive_prob
+
+def threshold_probability_costomize(network_type, N, d, network_seed, beta, betaeffect, dynamics, arguments, bin_num=100):
+    """TODO: Docstring for threshold_probability.
+
+    :network_type: TODO
+    :N: TODO
+    :d: TODO
+    :network_seed: TODO
+    :dynamics: TODO
+    :arguments: TODO
+    :num_high_neighbor: TODO
+    :n_threshold: TODO
+    :returns: TODO
+
+    """
+    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
+    weight = A.max()  # for uniform edge weights
+    k = np.sum(A>0, 0)
+    N_actual = len(k)
+    k_unique, index_unique = np.unique(k, return_index=True)
+    k_count = dict(sorted(collections.Counter(k).items()))
+
+    sH, gL_gH_ratio, gi_gH_ratio = threshold_sH_or_sL_diffstate(network_type, N, d, beta, betaeffect, network_seed, dynamics, arguments, attractor_high, attractor_low)
+    n_threshold = sH / weight
+    gi_gH_ratio_unique = gi_gH_ratio[index_unique]
+    survive_prob = {}
+    for i in range(N_actual):
+        neighbor_index = np.where(A[i] > 0)[0]
+        neighbor_k_i = k[neighbor_index]
+        weights = []
+        for j in k_unique:
+            weights.append(sum(neighbor_k_i == j))
+        n_dist, n_interval = np.histogram(gi_gH_ratio_unique, bin_num, weights=weights, density=True)
+        n_value = (n_interval[:-1] + n_interval[1:]) / 2
+        n_value_diff = np.mean(np.diff(n_value))
+        for num_high_neighbor in range(len(neighbor_index)+1):
+            if not num_high_neighbor in survive_prob:
+                survive_prob[num_high_neighbor] = {}
+            n_high_sum_value = np.array([n_value[0]*num_high_neighbor + i * n_value_diff for i in range(num_high_neighbor * (bin_num-1)+ 1)])
+            n_high_sum_dis = multi_conv(n_dist, num_high_neighbor)
+            n_high_sum_prob = n_high_sum_dis/n_high_sum_dis.sum()
+            num_low_neighbor = len(neighbor_index) - num_high_neighbor
+            contribute_low_neighbor = num_low_neighbor * gL_gH_ratio
+            if n_high_sum_value.max() < (n_threshold-contribute_low_neighbor):
+                n_high_sum_cumu_prob = 0
+            else:
+                index_satisfy = np.where(n_high_sum_value >= (n_threshold-contribute_low_neighbor))[0][0]
+                n_high_sum_cumu_prob = np.sum(n_high_sum_prob[index_satisfy:])
+            survive_prob[num_high_neighbor][i] = n_high_sum_cumu_prob
+            if abs(n_high_sum_cumu_prob- 1) < 1e-8:
+                break
+    survive_prob_ave_over_deg = collections.defaultdict(dict)
+    for i, j in zip(survive_prob.keys(), survive_prob.values()):
+        
+        index_j, prob = np.array(list(j.keys())), np.array(list(j.values()))
+        for k_j_unique in k_unique:
+            index = np.where(k[index_j] == k_j_unique)[0]
+            if len(index):
+                survive_prob_ave_over_deg[i][k_j_unique] = np.mean(prob[index])
+            else:
+                survive_prob_ave_over_deg[i][k_j_unique] = 1
+    return survive_prob_ave_over_deg
+
+def active_Z_diffstate(x, degree_excess_distribution, f, n, survive_prob):
+    """TODO: Docstring for active_probability.
+
+    :f: TODO
+    :returns: TODO
+
+    """
+
+    N = 500
+    p = 0
+    for k in range(0, N):
+        if degree_excess_distribution[k]:
+            p_comb = 1-np.sum([comb(k, l) *x**l * (1-x)**(k-l) * (1-survive_prob[l][k+1]) for l in range(0, min(k+1, n))]) 
+            p += degree_excess_distribution[k] * p_comb
+    result = f + (1-f) * p - x
+    return result
+
+def active_R_diffstate(Z, degree_distribution, f, n, survive_prob):
+    """TODO: Docstring for active_probability.
+
+    :f: TODO
+    :returns: TODO
+
+    """
+
+    N = 500
+    p = 0
+    for k in range(0, N):
+        if degree_distribution[k]:
+            p_comb = 1-np.sum([comb(k, l) *Z**l * (1-Z)**(k-l) * (1-survive_prob[l][k]) for l in range(0, min(k+1, n))]) 
+            p += degree_distribution[k] * p_comb
+    R = f + (1-f) * p 
+    return R
+
+def active_probability_diffstate(degree_distribution, degree_excess_distribution, percolation_file, x_try, f, n, survive_prob):
+    """TODO: Docstring for active_probability.
+
+    :arg1: TODO
+    :returns: TODO
+
+    """
+    x_solution = []
+    for x0 in x_try:
+        x_sol = fsolve(active_Z_diffstate, x0, args=(degree_excess_distribution, f, n, survive_prob))
+        result = active_Z_diffstate(x_sol, degree_excess_distribution, f, n, survive_prob)
+        if abs(result) < 1e-10:
+            x_solution.append(x_sol)
+    x_solution = np.array(x_solution)
+    solution = np.min(x_solution[x_solution>=0])
+    R = active_R_diffstate(solution, degree_distribution, f, n, survive_prob)
+    active_data = pd.DataFrame(np.hstack((f, R)).reshape(1, 2))
+    active_data.to_csv(percolation_file, mode='a', index=False, header=False)
+    return None
+
+def active_transition_diffstate(network_type, N, d, network_seed, beta, betaeffect, dynamics, x_try, f_list, degree_data):
+    """TODO: Docstring for active_transition.
+
+    :x_try: TODO
+    :f_list: TODO
+    :c: TODO
+    :k: TODO
+    :returns: TODO
+
+    """
+    k = 500
+    degree = range(k)
+    if degree_data=='empirical':
+        degree_bins, degree_probability, degree_excess_probability = empirical_degree(network_type, N, network_seed, d)
+        degree_distribution = np.hstack((np.zeros(degree_bins[0]), degree_probability, np.zeros(k-1-degree_bins[-1])))
+        degree_excess_distribution = np.hstack((np.zeros(degree_bins[0]- 1 ), degree_excess_probability, np.zeros(k-degree_bins[-1])))
+    elif degree_data == 'ER':
+        degree_distribution = np.array([ER_degree(c, i) for i in degree])
+
+    percolation_dir = '../data/' + dynamics + '/' + network_type +  f'/percolation_diffstate/'
+    if not os.path.exists(percolation_dir):
+        os.makedirs(percolation_dir)
+    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
+    #survive_prob = threshold_probability(network_type, N, d, network_seed, beta, betaeffect, dynamics, arguments, bin_num=100)
+    survive_prob = threshold_probability_costomize(network_type, N, d, network_seed, beta, betaeffect, dynamics, arguments, bin_num=100)
+    if betaeffect:
+        weight = A.max()
+        percolation_file = percolation_dir + f'N={N}_d={d}_netseed={network_seed}_beta={beta}_percolation.csv'
+    else:
+        weight = beta
+        beta = betaspace(A, [0])[0]
+        percolation_file = percolation_dir + f'N={N}_d={d}_netseed={network_seed}_weight={weight}_percolation.csv'
+    n = max(list(survive_prob.keys()))
+    p = mp.Pool(cpu_number)
+    p.starmap_async(active_probability_diffstate, [(degree_distribution, degree_excess_distribution, percolation_file, x_try, f, n, survive_prob) for f in f_list]).get()
+    p.close()
+    p.join()
+    return None
 
 
 arguments = (B, C, D, E, H, K)
@@ -644,7 +967,6 @@ for beta in beta_list:
 weight = 0.05
 beta = 0.84706
 threshold = 5
-#threshold_sH_or_sL_neighbor(network_type, N, weight, network_seed, d, dynamics, arguments, threshold)
 beta = 1
 weight = 0.02237
 #threshold_sH_or_sL_beta(dynamics, beta)
@@ -666,7 +988,7 @@ step_num = 8
 control_seed = 2
 control_num = 0.1
 control_seed_list = np.arange(10).tolist()
-control_num_list = [0.1, 0.2]
+control_num_list = [0.2]
 attractor_high = 5
 attractor_low = 0.1
 
@@ -679,30 +1001,44 @@ N = 1000
 
 
 
+
+
 network_type = 'ER'
 d = 3000
-network_seed_list = np.arange(0, 10, 1).tolist()
+d_list = [3000]
+network_seed_list = np.arange(3, 10, 1).tolist()
 network_seed = 0
 
 network_type = 'SF'
+d = [3.8, 999, 5]
 d = [2.5, 999, 3]
+d = [3, 999, 4]
+d_list = [[2.5, 0, 3], [3, 0, 4]]
 network_seed_list = np.tile(np.arange(0, 10, 1), (2, 1)).transpose().tolist()
 network_seed = [0, 0]
+
 
 f_list = np.arange(0, 1, 0.01)
 
 betaeffect = 0
 beta = 0.1
+beta_list = [0.1]
 
 
-active_transition(network_type, N, d, network_seed, beta, betaeffect, dynamics, x_try, f_list, degree_data)
-for f in f_list:
-    #activate_parallel(network_type, N, d, network_seed, control_seed_list, f, beta, betaeffect)
-    pass
+for network_seed in network_seed_list:
+    for d in d_list:
+        #active_transition_diffstate(network_type, N, d, network_seed, beta, betaeffect, dynamics, x_try, f_list, degree_data)
+        for beta in beta_list:
+            for f in f_list:
+                #activate_parallel(network_type, N, d, network_seed, control_seed_list, f, beta, betaeffect)
+                #activate_parallel_diffstate(network_type, N, d, network_seed, control_seed_list, f, beta, betaeffect, attractor_high, attractor_low)
+                pass
 
-for control_num in f_list:
-    #random_control_parallel(network_type, N, beta, betaeffect, network_seed, d, control_num, control_seed_list, attractor_high, attractor_low)
-    pass
+for d in d_list:
+    for network_seed in network_seed_list:
+        for control_num in f_list:
+            random_control_parallel(network_type, N, beta, betaeffect, network_seed, d, control_num, control_seed_list, attractor_high, attractor_low)
+            pass
 
 for control_num in control_num_list:
     for control_seed in control_seed_list:
