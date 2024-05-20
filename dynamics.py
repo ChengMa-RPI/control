@@ -136,7 +136,7 @@ def neighbor_dynamics(x, t, k_L, k_H, x_L, x_H, arguments):
     dxdt = B + x * (1 - x/K) * ( x/C - 1) + k_L * x*x_L / (D + E*x + H*x_L) + k_H * x*x_H/(D + E*x + H*x_H) 
     return dxdt
 
-def neighbor_effect(dynamics, network_type, N, arguments, beta_set, betaeffect, degree=4, network_seed=0, d=None, t=np.arange(0, 50, 0.01)):
+def neighbor_effect(dynamics, network_type, N, arguments, egwt_list, degree_list, t=np.arange(0, 50, 0.01)):
     """original dynamics N species interaction.
 
     :x: N dynamic variables, 1 * N vector 
@@ -148,27 +148,26 @@ def neighbor_effect(dynamics, network_type, N, arguments, beta_set, betaeffect, 
     :returns: derivative of x 
 
     """
-    neighbor_H_set = []
-    for beta in beta_set:
-        for N_L in np.arange(0, degree)[::-1]:
-            
-            N_H = degree - N_L
-            A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
-            xs_low, xs_high = stable_state(A, A_interaction, index_i, index_j, cum_index, arguments, d=d)
-            x_L = xs_low[0]
-            x_H = xs_high[0]
-            k_L = N_L/(N_L + N_H) * np.sum(A, 0)[0]
-            k_H = N_H/(N_L + N_H) * np.sum(A, 0)[0]
-            x = odeint(neighbor_dynamics, x_L, t, args=(k_L, k_H, x_L, x_H, arguments))[-1]
-            R = (x - x_L)/(x_H - x_L)
-            if R>0.2:
-                neighbor_H = N_H
-                break
-            else:
-                neighbor_H = degree + 1
-        neighbor_H_set.append(neighbor_H)
+    neighbor_H_list = np.zeros((np.size(egwt_list), np.size(degree_list)))
+    for egwt, i in zip(egwt_list, range(np.size(egwt_list))):
+        x_L = odeint(mutual_1D, 0, t, args=(egwt, arguments))[-1]
+        x_H = odeint(mutual_1D, 5, t, args=(egwt, arguments))[-1]
+        for degree, j in zip(degree_list, range(np.size(degree_list))):
+            for N_L in np.arange(0, degree)[::-1]:
+                
+                N_H = degree - N_L
+                k_L = N_L * egwt
+                k_H = N_H * egwt
+                x = odeint(neighbor_dynamics, x_L, t, args=(k_L, k_H, x_L, x_H, arguments))[-1]
+                R = (x - x_L)/(x_H - x_L)
+                if R>0.5:
+                    neighbor_H = N_H
+                    break
+                else:
+                    neighbor_H = degree + 1
+            neighbor_H_list[i, j]  = neighbor_H
 
-    return np.array(neighbor_H_set)
+    return neighbor_H_list
 
 
 
@@ -177,18 +176,20 @@ dynamics = mutual_multi
 network_type = '2D'
 network_type = 'ER'
 network_seed = 0
-N = 900
+N = 40
 beta_list = np.setdiff1d(np.round(np.arange(0.42, 1.3, 0.02), 2), np.round(np.arange(0.4, 1.3, 0.1), 2))
 beta_list = [1]
 beta_list = [0.2]
-d_list = [1800]
+d_list = [40]
 
 control_value_list = [1]
-control_num_list = [5]
-control_seed_list = np.arange(0, 1000, 1)
-ratio_save = 1
-evolution_save = 0
+control_num_list = [10]
+control_seed_list = np.arange(0, 100, 1)
+control_seed_list = [0]
+ratio_save = 0
+evolution_save = 1
 betaeffect = 0
+'''
 for d in d_list:
     for beta in beta_list:
         for control_num in control_num_list:
@@ -198,6 +199,6 @@ for d in d_list:
                 t2 = time.time()
                 print(t2 -t1)
 '''
-beta_set = np.arange(0, 2, 0.1)
-neighbor_H = neighbor_effect(dynamics, network_type, N, arguments, beta_set, betaeffect)
-'''
+egwt_list = np.arange(0, 0.5, 0.02)
+degree_list = np.arange(1, 50, 1)
+neighbor_H = neighbor_effect(dynamics, network_type, N, arguments, egwt_list, degree_list)

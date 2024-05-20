@@ -32,23 +32,17 @@ def ER_degree(c, k):
     """
     return np.exp(-c) * c**k /math.factorial(k)
 
-def empirical_degree(network_type, N, network_seed, d):
-    """TODO: Docstring for empirical_degree.
+def RR_degree(c, k):
+    """TODO: Docstring for degree_distribution.
 
-    :network_type: TODO
-    :N: TODO
-    :network_seed: TODO
-    :d: TODO
+    :c: TODO
+    :k: TODO
     :returns: TODO
 
     """
-    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, 1, 0, network_seed, d)
-    degree_list = np.sum(A>0, 0)
-    frequency, degree_bins = np.histogram(degree_list, bins=np.arange(degree_list.min(), degree_list.max()+2, 1))
-    degree_probability = frequency/np.sum(frequency)
-    return degree_bins[:-1], degree_probability
+    return 1 if k==c else 0
 
-def active_equation(x, degree_distribution, f, n):
+def active_equation(x, degree_distribution, p, k):
     """TODO: Docstring for active_probability.
 
     :f: TODO
@@ -56,16 +50,19 @@ def active_equation(x, degree_distribution, f, n):
 
     """
 
+    #result = f + (1-f) * np.sum([degree_distribution(c, i) * np.sum([comb(i, l) *x**l * (1-x)**(i-l) for l in range(k, i) ]) for i in range(k, N) ]) - x
     N = 100
-    p = 0
-    for k in range(0, N):
+    part = 0
+    for i in range(1, N):
         #p += degree_distribution[i] * sum([comb(i, l) *x**l * (1-x)**(i-l) for l in range(k, i+1)])
-        p_comb = 1-np.sum([comb(k, l) *x**l * (1-x)**(k-l) for l in range(0, n[k])]) if k>=n[k] else 0 
-        p += degree_distribution[k] * p_comb
-    result = f + (1-f) * p - x
+        if i <=k:
+            part = degree_distribution[i]
+        else:
+            part += degree_distribution[i] * (np.sum([comb(i, l) *x**(i-l) * (1-x)**(l) for l in range(0, k+1)]))
+    result = p + (1-p) * part - x
     return result
 
-def active_probability(degree_distribution, active_dir, x_try, f, n):
+def active_probability(degree_distribution, active_dir, x_try, p, k):
     """TODO: Docstring for active_probability.
 
     :arg1: TODO
@@ -74,18 +71,19 @@ def active_probability(degree_distribution, active_dir, x_try, f, n):
     """
     x_solution = []
     for x0 in x_try:
-        x_sol = fsolve(active_equation, x0, args=(degree_distribution, f, n))
-        result = active_equation(x_sol, degree_distribution, f, n)
+        x_sol = fsolve(active_equation, x0, args=(degree_distribution, p, k))
+        result = active_equation(x_sol, degree_distribution, p, k)
         if abs(result) < 1e-10:
             x_solution.append(x_sol)
     x_solution = np.array(x_solution)
+    print(x_solution)
     solution = np.min(x_solution[x_solution>=0])
 
-    active_data = pd.DataFrame(np.hstack((f, solution)).reshape(1, 2))
+    active_data = pd.DataFrame(np.hstack((p, solution)).reshape(1, 2))
     active_data.to_csv(active_dir + 'theory.csv', mode='a', index=False, header=False)
     return None
 
-def active_transition(network_type, x_try, f_list, c, beta, betaeffect, degree_data, N, network_seed, d):
+def active_transition(network_type, x_try, f_list, c, k):
     """TODO: Docstring for active_transition.
 
     :x_try: TODO
@@ -95,28 +93,24 @@ def active_transition(network_type, x_try, f_list, c, beta, betaeffect, degree_d
     :returns: TODO
 
     """
-    k = 100
-    degree = range(k)
-    if degree_data=='empirical':
-        degree_bins, degree_probability = empirical_degree(network_type, N, network_seed, d)
-        degree_distribution = np.hstack((np.zeros(degree_bins[0]), degree_probability, np.zeros(k-1-degree_bins[-1])))
-    elif network_type == 'ER':
+    N = 100
+    degree = range(N)
+    if network_type == 'ER':
         degree_distribution = np.array([ER_degree(c, i) for i in degree])
+    elif network_type == 'RR':
+        degree_distribution = np.array([RR_degree(c, i) for i in degree])
+    active_dir = '../data/recovery/' + network_type +  f'/c={c}/k={k}/'
+    if not os.path.exists(active_dir):
+        os.makedirs(active_dir)
 
-    active_dir = '../data/percolation/' + network_type +  f'/c={c}/'
-    if betaeffect:
-        active_dir += f'beta={beta}/'
-    else:
-        active_dir += f'edgewt={beta}/'
-    n = np.array(pd.read_csv(active_dir + 'threshold.csv', header=None), dtype=int)[:, -1]
     p = mp.Pool(cpu_number)
-    p.starmap_async(active_probability, [(degree_distribution, active_dir, x_try, f, n) for f in f_list]).get()
+    p.starmap_async(active_probability, [(degree_distribution, active_dir, x_try, f, k) for f in f_list]).get()
     p.close()
     p.join()
 
     return None
 
-def activate_process(active_seed, active_des, nodes, all_neighbors, f, n):
+def activate_process(active_seed, active_des, nodes, all_neighbors, f, k):
     """TODO: Docstring for activate_process.
     :returns: TODO
 
@@ -137,8 +131,7 @@ def activate_process(active_seed, active_des, nodes, all_neighbors, f, n):
         state_a = np.sum(state)
         for node in node_inactive:
             neighbor = all_neighbors[node]
-            degree = len(neighbor)
-            if sum(state[neighbor]) >= n[degree]:
+            if sum(state[neighbor]) >= k:
                 state[node] = 1
         state_b = np.sum(state)
 
@@ -148,7 +141,7 @@ def activate_process(active_seed, active_des, nodes, all_neighbors, f, n):
     active_data.to_csv(active_des + f'_f={f}.csv', mode='a', index=False, header=False)
     return None
 
-def activate_parallel(network_type, N, c, network_seed, active_seed_list, f, beta, betaeffect):
+def activate_parallel(network_type, N, c, network_seed, active_seed_list, f, k):
     """TODO: Docstring for activate_parallel.
 
     :arg1: TODO
@@ -164,18 +157,13 @@ def activate_parallel(network_type, N, c, network_seed, active_seed_list, f, bet
     for node in nodes:
         all_neighbors[node] = list(G.neighbors(node))
 
-    active_dir = '../data/percolation/' + network_type +  f'/c={c}/'
-    if betaeffect:
-        active_dir += f'beta={beta}/'
-    else:
-        active_dir += f'edgewt={beta}/'
-
+    active_dir = '../data/percolation/' + network_type +  f'/c={c}/k={k}/'
+    if not os.path.exists(active_dir):
+        os.makedirs(active_dir)
     active_des = active_dir + f'netseed={network_seed}_N={N}'
-    n = np.array(pd.read_csv(active_dir + 'threshold.csv', header=None), dtype=int)[:, -1]
-
 
     p = mp.Pool(cpu_number)
-    p.starmap_async(activate_process, [(active_seed, active_des, nodes, all_neighbors, f, n) for active_seed in active_seed_list]).get()
+    p.starmap_async(activate_process, [(active_seed, active_des, nodes, all_neighbors, f, k) for active_seed in active_seed_list]).get()
     p.close()
     p.join()
     return None
@@ -184,30 +172,31 @@ def activate_parallel(network_type, N, c, network_seed, active_seed_list, f, bet
 
 
 network_type = 'ER'
+network_type = 'RR'
 
-x_try = np.arange(0, 1.1, 0.1)
+x_try = np.arange(0, 1.1, 0.01)
 f = 0.042
 f_list = np.round(np.arange(0.0002, 0.01, 0.0001), 4)
 f_list = np.round(np.arange(0.055, 0.09, 0.005), 3)
 f_list = np.round(np.arange(0.044, 0.046, 0.0001), 4)
 f_list = np.round(np.arange(0.01, 1, 0.01), 2)
-f_list = np.round(np.arange(0.15, 0.20, 0.001), 3)
-f_list = np.round(np.arange(0.05, 0.07, 0.001), 3)
+f_list = np.round(np.arange(0.16, 0.17, 0.001), 3)
+f_list = [0]
 
-degree_data = 'empirical'
-N = 10000
-network_seed = 0
-c = 16
-d = int(N*c/2)
-beta = 0.05
-betaeffect = 0
-#active_transition(network_type, x_try, f_list, c, beta, betaeffect, degree_data, N, network_seed, d)
 
-N = 10000
+c = 10
+k = 4
+#solution = active_probability(x_try, f, c, k)
+#solution = active_transition(x_try, f_list, c, k)
+result = active_transition(network_type, x_try, f_list, c, k)
+
+N = 1000
 network_seed = 0
 active_seed_list = np.arange(100)
 
-f_list = np.round(np.arange(0.1, 0.149, 0.01), 2)
+f_list = np.round(np.arange(0.21, 0.25, 0.01), 2)
 
+'''
 for f in f_list:
-    activate_parallel(network_type, N, c, network_seed, active_seed_list, f, beta, betaeffect)
+    activate_parallel(network_type, N, c, network_seed, active_seed_list, f, k)
+'''

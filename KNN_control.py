@@ -3,7 +3,7 @@ os.environ['OPENBLAS_NUM_THREADS'] ='1'
 
 import sys
 sys.path.insert(1, '/home/mac/RPI/research/')
-from mutual_framework import load_data, A_from_data, Gcc_A_mat, betaspace, stable_state, network_generate, normalization_x, ode_Cheng, gif
+from mutual_framework import load_data, A_from_data, Gcc_A_mat, betaspace, stable_state, network_generate, normalization_x, ode_Cheng, gif, mutual_1D
 from kcore_KNN_degree_partition import mutual_multi, PPI_multi, BDP_multi, SIS_multi, CW_multi, genereg_multi, kcore_KNN, kcore_shell, kcore_KNN_degree, reducednet_effstate, neighborshell_given_core, group_partition_degree_interval
 
 import numpy as np 
@@ -31,6 +31,8 @@ K = 5
 D = 5 
 E = 0.9
 H = 0.1
+
+B_gene = 1
 
 cpu_number = 4
 
@@ -66,6 +68,47 @@ def mutual_multi_constant(x, t, control_node, control_constant, arguments, net_a
     dxdt[control_node] = 0.0
     return dxdt
 
+def genereg_1D(x, t, c, arguments):
+    B, = arguments
+    dxdt = -B * x  + c * x**2 / (x**2 + 1)
+    return dxdt
+
+def genereg_multi_constant(x, t, control_node, control_constant, arguments, net_arguments):
+    """describe the derivative of x.
+    set universal parameters 
+    :x: the species abundance of plant network 
+    :t: the simulation time sequence 
+    :par: parameters  of this system
+    :returns: derivative of x 
+
+    """
+    B, = arguments
+    index_i, index_j, A_interaction, cum_index = net_arguments
+    x[control_node] = control_constant 
+    sum_f = -B*x
+    sum_g = A_interaction * x[index_j]**2/ (x[index_j]**2 + 1)
+    dxdt = sum_f + np.add.reduceat(sum_g, cum_index[:-1])
+    dxdt[control_node] = 0.0
+    return dxdt
+
+def genereg_group_decouple(x, t, arguments, w, xs_group_transpose):
+    """TODO: Docstring for mutual_group_decouple.
+
+    :x: TODO
+    :t: TODO
+    :arguments: TODO
+    :w: TODO
+    :returns: TODO
+
+    """
+    B, = arguments
+    dxdt = -B*x + np.sum(w * xs_group_transpose**2 / (xs_group_transpose**2 + 1), 0)
+    return dxdt 
+
+
+
+
+
 def partition_connect_control(num_neighbors_control, interval):
     """ partition the subgroup according to the number of neighbors in the control set."""
     min_nn = np.min(num_neighbors_control)
@@ -78,15 +121,23 @@ def partition_connect_control(num_neighbors_control, interval):
             subgroup_index.append(subgroup_k)
     return subgroup_index
 
-def random_control(network_type, N, weight, network_seed, d, control_constant, control_num, control_seed, attractor_value, method, interval):
+def random_control(network_type, N, beta, betaeffect, network_seed, d, control_num, control_seed, attractor_low, attractor_high, method, interval):
     """TODO: Docstring for random_control.
 
     :arg1: TODO
     :returns: TODO
 
     """
+    dynamics_1D = globals()[dynamics + '_1D']
     dynamics_multi_constant = globals()[dynamics + '_multi_constant']
-    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, weight, 0, network_seed, d)
+    dynamics_group_decouple = globals()[dynamics + '_group_decouple']
+    A, A_interaction, index_i, index_j, cum_index = network_generate(network_type, N, beta, betaeffect, network_seed, d)
+    if betaeffect == 0:
+        weight = beta 
+        beta = betaspace(A, [0])[0]
+    else:
+        weight = A.max()
+
     k = np.sum(A>0, 0)
     w = np.sum(A, 0)
     N_actual = len(A)
@@ -116,16 +167,19 @@ def random_control(network_type, N, weight, network_seed, d, control_constant, c
 
     if not os.path.exists(des):
         os.makedirs(des)
-    "net arguments"
     net_arguments = (index_i, index_j, A_interaction, cum_index)
     t = np.arange(0, 1000, 0.01)
-    "original multi system"
-    initial_condition = np.ones(N_actual) * attractor_value
+
+    xH = odeint(dynamics_1D, np.array([attractor_high]), t, args=(beta, arguments))[-1]
+    control_constant = xH
+
+    "control on the original multi system"
+    initial_condition = np.ones(N_actual) * attractor_low
     xs_multi = odeint(dynamics_multi_constant, initial_condition, t, args=(node_r, control_constant, arguments, net_arguments))[-1]
 
     "reduction system"
     A_reduction, net_arguments_reduction, x_eff = reducednet_effstate(A, xs_multi, group_index)
-    initial_condition_reduction = np.ones(len(group_index)) * attractor_value
+    initial_condition_reduction = np.ones(len(group_index)) * attractor_low
     xs_reduction = odeint(dynamics_multi_constant, initial_condition_reduction, t, args=(0, control_constant, arguments, net_arguments_reduction))[-1]
 
     "node state by group decouple"
@@ -137,24 +191,30 @@ def random_control(network_type, N, weight, network_seed, d, control_constant, c
     xs_group_transpose = xs_reduction.reshape(length_groups, 1)
     w_group = np.add.reduceat(A_rearange, reduce_index[:-1])
     w_group_uncontrol = w_group[:, node_uncontrol]
-    initial_condition_uncontrol = np.ones(len(node_uncontrol)) * attractor_value
+    initial_condition_uncontrol = np.ones(len(node_uncontrol)) * attractor_low
     xs_group_decouple = np.ones(N_actual) * control_constant
-    xs_group_decouple[node_uncontrol] = odeint(mutual_group_decouple, initial_condition_uncontrol, t, args=(arguments, w_group_uncontrol, xs_group_transpose))[-1]
+    xs_group_decouple[node_uncontrol] = odeint(dynamics_group_decouple, initial_condition_uncontrol, t, args=(arguments, w_group_uncontrol, xs_group_transpose))[-1]
 
     "data saving"
     data_reduction = np.hstack((control_num, np.ravel(A_reduction), x_eff, xs_reduction))
     reduction_df = pd.DataFrame(data_reduction.reshape(1, len(data_reduction)))
-    des_file_reduction = des + f'N={N}_d={d}_netseed={network_seed}_wt={weight}_controlseed={control_seed}_controlconstant={control_constant}.csv'
+    if betaeffect == 0:
+        des_file_reduction = des + f'N={N}_d={d}_netseed={network_seed}_wt={weight}_controlseed={control_seed}.csv'
+    else:
+        des_file_reduction = des + f'N={N}_d={d}_netseed={network_seed}_beta={beta}_controlseed={control_seed}.csv'
     reduction_df.to_csv(des_file_reduction , mode = 'a', index=False, header=False)
 
     node_group_mapping = np.hstack(([[i] * len(subgroup) for i, subgroup in enumerate(group_index)]))
     data_multi = np.hstack((np.tile(control_num, (4, 1)), np.vstack((rearange_index, node_group_mapping, xs_multi[rearange_index], xs_group_decouple[rearange_index]))))
     multi_df = pd.DataFrame(data_multi)
-    des_file_multi = des + f'N={N}_d={d}_netseed={network_seed}_wt={weight}_controlseed={control_seed}_controlconstant={control_constant}_multi_xs.csv'
+    if betaeffect == 0:
+        des_file_multi = des + f'N={N}_d={d}_netseed={network_seed}_wt={weight}_controlseed={control_seed}_multi_xs.csv'
+    else:
+        des_file_multi = des + f'N={N}_d={d}_netseed={network_seed}_beta={beta}_controlseed={control_seed}_multi_xs.csv'
     multi_df.to_csv(des_file_multi , mode = 'a', index=False, header=False)
     return None
 
-def random_control_parallel(network_type, N, weight, network_seed, d, control_constant, control_num, control_seed_list, attractor_value, method, interval):
+def random_control_parallel(network_type, N, beta, betaeffect, network_seed, d, control_num, control_seed_list, attractor_low, attractor_high, method, interval):
     """TODO: Docstring for MFT_parallel.
 
     :arg1: TODO
@@ -162,7 +222,7 @@ def random_control_parallel(network_type, N, weight, network_seed, d, control_co
 
     """
     p = mp.Pool(cpu_number)
-    p.starmap_async(random_control, [(network_type, N, weight, network_seed, d, control_constant, control_num, control_seed, attractor_value, method, interval) for control_seed in control_seed_list]).get()
+    p.starmap_async(random_control, [(network_type, N, beta, betaeffect, network_seed, d, control_num, control_seed, attractor_low, attractor_high, method, interval) for control_seed in control_seed_list]).get()
     p.close()
     p.join()
     return None
@@ -171,30 +231,41 @@ def random_control_parallel(network_type, N, weight, network_seed, d, control_co
         
 
 dynamics = 'mutual'
-dynamics_multi = 'mutual_constant'
 arguments = (B, C, D, E, H, K)
 
-control_num_list = np.round(np.arange(0.01, 1, 0.01), 2)
-control_constant = 5
-attractor_value = 0.1
+dynamics = 'genereg'
+arguments = (B_gene, )
+
+attractor_low = 0.001
+attractor_high = 5
+
+interval = 1
+betaeffect = 0
 
 
-
+control_num_list = np.round(np.arange(0.001, 0.1, 0.001), 4)
 control_seed_list = np.arange(4)
+
+network_type = 'SF'
+N = 1000
+network_seed = [0, 0]
+d = [2.5, 0, 3]
+beta = 0.15
+
 network_type = 'ER'
 N = 1000
 network_seed = 0
-c = 4
+c = 8
 d = int(N*c/2)
-weight = 0.2
-interval = 1
+beta = 0.25
+
 
 method_list = ['KNN', 'firstNN', 'KNN_connect_control']
+method_list = ['KNN']
 
 for i, control_num in enumerate(control_num_list):
     for method in method_list:
-        #random_control_KNN(network_type, N, weight, network_seed, d, control_constant, control_num, control_seed, attractor_value, method, space, degree_interval)
-        random_control_parallel(network_type, N, weight, network_seed, d, control_constant, control_num, control_seed_list, attractor_value, method, interval)
+        random_control_parallel(network_type, N, beta, betaeffect, network_seed, d, control_num, control_seed_list, attractor_low, attractor_high, method, interval)
         pass
     #random_control_connectnum(network_type, N, weight, network_seed, d, control_constant, control_num, control_seed, attractor_value, interval)
 
